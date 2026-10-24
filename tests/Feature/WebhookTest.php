@@ -98,7 +98,7 @@ class WebhookTest extends TestCase
         $created = $this->postJson('/api/v1/webhooks', [
             'url' => self::URL,
             'events' => ['job.completed', 'job.failed'],
-            'description' => 'SocialAI',
+            'description' => 'Aplicación cliente',
         ], $headers)->assertCreated()->assertJsonPath('data.object', 'webhook');
 
         $id = $created->json('data.id');

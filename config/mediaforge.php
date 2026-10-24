@@ -117,10 +117,10 @@ return [
         // Antigüedad máxima aceptable de la firma (documentada para los receptores)
         'signature_tolerance_seconds' => 300,
         'rotation_grace_minutes' => 1440,
-        // HTTP sin TLS solo fuera de producción (p. ej. SocialAI en la red Docker local)
+        // HTTP sin TLS solo fuera de producción (p. ej. en la red Docker local)
         'allow_http' => (bool) env('MEDIAFORGE_WEBHOOK_ALLOW_HTTP', env('APP_ENV') !== 'production'),
         'allowed_ports' => array_map('intval', explode(',', (string) env('MEDIAFORGE_WEBHOOK_ALLOWED_PORTS', '443,80,8443'))),
-        // Hosts internos de confianza que pueden resolver a IPs privadas (p. ej. "socialai-api")
+        // Hosts internos de confianza que pueden resolver a IPs privadas
         'allowed_hosts' => array_values(array_filter(array_map('trim', explode(',', (string) env('MEDIAFORGE_WEBHOOK_ALLOWED_HOSTS', ''))))),
     ],
 

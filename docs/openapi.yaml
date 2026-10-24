@@ -844,7 +844,7 @@ components:
       type: object
       required: [url, events]
       properties:
-        url: { type: string, format: uri, maxLength: 2048, example: 'https://socialai.example.com/webhooks/mediaforge' }
+        url: { type: string, format: uri, maxLength: 2048, example: 'https://consumer.example.com/webhooks/mediaforge' }
         description: { type: [string, 'null'], maxLength: 255 }
         events: { type: array, minItems: 1, items: { $ref: '#/components/schemas/WebhookEventType' } }
         is_active: { type: boolean, default: true }

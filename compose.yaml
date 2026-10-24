@@ -189,7 +189,7 @@ services:
       retries: 5
 
 networks:
-  # Nombre fijo para que otros proyectos (p. ej. socialaiapi) puedan unirse como red externa
+  # Nombre fijo para que los servicios consumidores puedan unirse como red externa
   mediaforge:
     name: mediaforge-network
 

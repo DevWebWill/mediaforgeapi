@@ -41,7 +41,7 @@ docker compose down                          # parar (añadir -v para borrar dat
 Autenticación: `Authorization: Bearer <api-key>`. Cada cliente solo ve sus propios archivos y trabajos.
 
 ```bash
-docker compose exec app php artisan mediaforge:client:create "SocialAI Automator"   # muestra la clave una sola vez
+docker compose exec app php artisan mediaforge:client:create "Aplicación cliente"   # muestra la clave una sola vez
 docker compose exec app php artisan mediaforge:client:list
 docker compose exec app php artisan mediaforge:key:rotate <key_id> --grace-minutes=60
 docker compose exec app php artisan mediaforge:key:revoke <key_id>
@@ -98,10 +98,10 @@ VBV con buffer de dos segundos), `audio_sample_rate` (44100/48000),
 `constant_video_bitrate_kbps` (64–25000, solo H.264) activa CBR con relleno,
 excluye `max_video_bitrate_kbps` y sustituye CRF; sirve para el tamaño mínimo
 de LinkedIn incluso con escenas estáticas.
-Permiten normalizar vídeo para SocialAI sin filtros arbitrarios: H.264 MP4 con
+Permiten normalizar vídeo sin filtros arbitrarios: H.264 MP4 con
 bandas (`resize`, `strategy=pad`), 30 FPS y audio AAC estéreo 48 kHz.
 No se cambian los valores anteriores si se omiten estos parámetros.
-SocialAI conserva su copia privada, descarga y valida el resultado y elimina
+La aplicación consumidora conserva su copia privada, descarga y valida el resultado y elimina
 mediante la API los archivos remotos de entrada/salida. La retención y el
 comando de limpieza siguen siendo obligatorios para temporales huérfanos.
 
@@ -204,7 +204,7 @@ Redis tiene contraseña, persistencia AOF y `maxmemory-policy noeviction` para n
 
 ## Integración con otros servicios
 
-Los contenedores comparten la red `mediaforge-network`. Otro proyecto (p. ej. socialaiapi) puede unirse a ella como red externa y llamar a la API en `http://mediaforge-api`. Para recibir webhooks en un host interno (p. ej. `http://socialai-api/...`), añádelo a `MEDIAFORGE_WEBHOOK_ALLOWED_HOSTS`:
+Los contenedores comparten la red `mediaforge-network`. Cualquier servicio consumidor puede unirse a ella como red externa y llamar a la API en `http://mediaforge-api`. Para recibir webhooks en un host interno (p. ej. `http://consumer-api/...`), añádelo a `MEDIAFORGE_WEBHOOK_ALLOWED_HOSTS`:
 
 ```yaml
 networks:

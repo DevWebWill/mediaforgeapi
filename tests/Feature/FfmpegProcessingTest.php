@@ -99,7 +99,7 @@ class FfmpegProcessingTest extends TestCase
         yield 'convert h265 mkv' => ['sample.mp4', 'convert', ['format' => 'mkv', 'video_codec' => 'h265', 'preset' => 'veryfast'], 'result', 'mkv', ['video_codec' => 'hevc']];
         yield 'resize crop vertical' => ['sample.mp4', 'resize', ['width' => 180, 'height' => 320, 'strategy' => 'crop', 'preset' => 'veryfast', 'fps' => 15], 'result', 'mp4', ['width' => 180, 'height' => 320, 'fps' => 15.0]];
         yield 'resize pad' => ['sample.mp4', 'resize', ['width' => 320, 'height' => 320, 'strategy' => 'pad', 'pad_color' => '#FFFFFF', 'preset' => 'veryfast'], 'result', 'mp4', ['width' => 320, 'height' => 320]];
-        yield 'socialai normalization' => ['sample.mp4', 'resize', ['width' => 720, 'height' => 900, 'strategy' => 'pad',
+        yield 'video normalization' => ['sample.mp4', 'resize', ['width' => 720, 'height' => 900, 'strategy' => 'pad',
             'video_codec' => 'h264', 'audio_codec' => 'aac', 'fps' => 30, 'preset' => 'veryfast',
             'max_video_bitrate_kbps' => 500, 'audio_bitrate_kbps' => 96, 'audio_sample_rate' => 48000,
             'audio_channels' => 2, 'deinterlace' => true], 'result', 'mp4',
@@ -126,7 +126,7 @@ class FfmpegProcessingTest extends TestCase
         $this->assertTrue($job->result['media']['has_audio']);
     }
 
-    public function test_socialai_output_satisfies_pixel_scan_sar_and_audio_constraints(): void
+    public function test_normalized_output_satisfies_pixel_scan_sar_and_audio_constraints(): void
     {
         $job = $this->runJob('sample.mp4', 'resize', [
             'width' => 720, 'height' => 900, 'strategy' => 'pad', 'fps' => 30,

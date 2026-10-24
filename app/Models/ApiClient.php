@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
- * Aplicación consumidora de la API (p. ej. SocialAI Automator).
+ * Aplicación consumidora de la API.
  *
  * @property int $id
  * @property string $public_id

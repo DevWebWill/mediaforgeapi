@@ -7,7 +7,7 @@ MediaForge avisa cuando un trabajo termina, así no hace falta consultar `GET /j
 ```bash
 curl -X POST http://localhost:8081/api/v1/webhooks \
   -H "Authorization: Bearer $MEDIAFORGE_KEY" -H "Content-Type: application/json" \
-  -d '{"url":"https://socialai.example.com/webhooks/mediaforge","events":["job.completed","job.failed","job.cancelled"]}'
+  -d '{"url":"https://consumer.example.com/webhooks/mediaforge","events":["job.completed","job.failed","job.cancelled"]}'
 ```
 
 La respuesta (201) incluye `secret` (`whsec_...`). **Solo se muestra esta vez**: guárdalo como secreto de configuración.
@@ -17,7 +17,7 @@ Reglas de la URL:
 - En producción solo se admite `https`.
 - No se admiten credenciales, fragmentos ni puertos distintos de `MEDIAFORGE_WEBHOOK_ALLOWED_PORTS`.
 - El host no puede resolver a una IP privada, de loopback, link-local, CGNAT ni de metadatos cloud. La comprobación se repite en cada envío y la conexión se fija a la IP validada, para evitar ataques de DNS rebinding.
-- Para un servicio interno de confianza (p. ej. `http://socialai-api` en la red Docker), añade su host a `MEDIAFORGE_WEBHOOK_ALLOWED_HOSTS`.
+- Para un servicio interno de confianza (p. ej. `http://consumer-api` en la red Docker), añade su host a `MEDIAFORGE_WEBHOOK_ALLOWED_HOSTS`.
 
 Al crear un trabajo, `webhook_url` es opcional y debe coincidir exactamente con la URL de un webhook activo. Si se indica, solo ese webhook recibe los eventos de ese trabajo. Si no se indica, los reciben todos los webhooks suscritos del cliente.
 
