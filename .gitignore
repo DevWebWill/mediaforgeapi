@@ -22,3 +22,6 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Notas internas (producción, credenciales): nunca se publican
+/private/
