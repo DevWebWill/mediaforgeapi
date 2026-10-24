@@ -38,6 +38,16 @@ return [
             'report' => false,
         ],
 
+        // Archivos multimedia: privados, nunca servidos directamente (solo vía endpoints autorizados)
+        'media' => [
+            'driver' => 'local',
+            'root' => env('MEDIAFORGE_STORAGE_ROOT', storage_path('app/media')),
+            'visibility' => 'private',
+            'serve' => false,
+            'throw' => true,
+            'report' => false,
+        ],
+
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),

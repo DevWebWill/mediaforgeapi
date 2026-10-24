@@ -1,0 +1,900 @@
+openapi: 3.1.0
+info:
+  title: MediaForge API
+  version: 1.0.0
+  summary: Servicio independiente de procesamiento multimedia con FFmpeg.
+  description: |
+    Flujo típico:
+    1. `POST /files` sube el archivo original (se valida con ffprobe).
+    2. `POST /jobs` crea un trabajo asíncrono (202). Usa `Idempotency-Key` para reintentos seguros.
+    3. Espera el webhook `job.completed` / `job.failed` (recomendado) o consulta `GET /jobs/{id}`.
+    4. `GET /jobs/{id}/result` devuelve los archivos generados; descárgalos con `GET /files/{id}/download`.
+
+    Todos los identificadores son públicos y con prefijo (`file_`, `job_`, `whk_`, `evt_`, `dlv_`).
+    Cada cliente solo ve sus propios recursos (un recurso ajeno responde 404).
+servers:
+  - url: http://localhost:8081/api/v1
+    description: Docker local
+  - url: http://mediaforge-api/api/v1
+    description: Red Docker compartida (mediaforge-network)
+security:
+  - bearerAuth: []
+tags:
+  - name: Sistema
+  - name: Catálogo
+  - name: Archivos
+  - name: Trabajos
+  - name: Webhooks
+
+paths:
+  /health:
+    get:
+      tags: [Sistema]
+      summary: Estado del servicio y sus dependencias
+      security: []
+      responses:
+        '200':
+          description: Todo operativo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+        '503':
+          description: Alguna dependencia no está disponible
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+
+  /operations:
+    get:
+      tags: [Catálogo]
+      summary: Operaciones disponibles y sus parámetros
+      responses:
+        '200':
+          description: Catálogo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Operation' } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /operations/{operation}:
+    get:
+      tags: [Catálogo]
+      summary: Detalle de una operación
+      parameters:
+        - name: operation
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/OperationName' }
+      responses:
+        '200':
+          description: Operación
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Operation' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /profiles:
+    get:
+      tags: [Catálogo]
+      summary: Perfiles versionados (valores por defecto por plataforma)
+      description: Los perfiles son puntos de partida; no garantizan el cumplimiento de las políticas de cada plataforma.
+      responses:
+        '200':
+          description: Perfiles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Profile' } }
+  /profiles/{profile}:
+    get:
+      tags: [Catálogo]
+      summary: Detalle de un perfil
+      parameters:
+        - name: profile
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/ProfileId' }
+      responses:
+        '200':
+          description: Perfil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Profile' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /files:
+    post:
+      tags: [Archivos]
+      summary: Subir un archivo original
+      description: |
+        Se comprueban tamaño, extensión, firma real del contenido, cuota del cliente y espacio en disco.
+        Después se analiza con ffprobe y se decodifican los primeros segundos para descartar archivos corruptos.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '201':
+          description: Archivo almacenado
+          headers:
+            Location: { schema: { type: string, format: uri } }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/File' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '413': { $ref: '#/components/responses/Error' }
+        '415':
+          description: Tipo no admitido, contenido no reconocible o archivo corrupto (`unsupported_media_type`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Validación o límite multimedia (`validation_failed`, `media_limit_exceeded`, `storage_quota_exceeded`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '507':
+          description: Sin espacio en disco (`insufficient_storage`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    get:
+      tags: [Archivos]
+      summary: Listar archivos
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Página de archivos
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CursorPage'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/File' } }
+  /files/{file}:
+    parameters:
+      - $ref: '#/components/parameters/FileId'
+    get:
+      tags: [Archivos]
+      summary: Consultar un archivo
+      responses:
+        '200':
+          description: Archivo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/File' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Archivos]
+      summary: Eliminar un archivo
+      responses:
+        '204': { description: Eliminado }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Lo usa un trabajo activo (`file_in_use`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /files/{file}/download:
+    parameters:
+      - $ref: '#/components/parameters/FileId'
+    get:
+      tags: [Archivos]
+      summary: Descargar el contenido
+      responses:
+        '200':
+          description: Contenido binario
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /jobs:
+    post:
+      tags: [Trabajos]
+      summary: Crear un trabajo de procesamiento
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          description: |
+            Opcional (8-128 caracteres `[A-Za-z0-9._:-]`). Misma clave y misma petición devuelven el trabajo
+            existente con `Idempotent-Replayed: true`; misma clave con otra petición devuelve 409. Caduca a las 24 h.
+          schema: { type: string, pattern: '^[A-Za-z0-9._:-]{8,128}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateJob' }
+            examples:
+              tiktok:
+                value: { file_id: file_01jb8x0c5m3v6r2q7t9w4y1z8a, operation: resize, profile: tiktok, reference: post-42 }
+              thumbnail:
+                value: { file_id: file_01jb8x0c5m3v6r2q7t9w4y1z8a, operation: thumbnail, parameters: { mode: at_time, time: 3.5, format: jpg } }
+      responses:
+        '202':
+          description: Trabajo aceptado (se procesa en segundo plano)
+          headers:
+            Location: { schema: { type: string, format: uri } }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Job' }
+        '400':
+          description: Idempotency-Key no válida (`invalid_idempotency_key`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Clave de idempotencia reutilizada con otra petición (`idempotency_key_reused`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Validación (operación, perfil, parámetros, archivo, prioridad, `webhook_url`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Límite de peticiones o de trabajos activos (`rate_limited`, `active_jobs_limit_exceeded`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    get:
+      tags: [Trabajos]
+      summary: Listar trabajos
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/JobStatus' }
+        - name: operation
+          in: query
+          schema: { $ref: '#/components/schemas/OperationName' }
+        - name: reference
+          in: query
+          schema: { type: string, maxLength: 191 }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Página de trabajos
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CursorPage'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/Job' } }
+  /jobs/{job}:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    get:
+      tags: [Trabajos]
+      summary: Consultar un trabajo
+      responses:
+        '200':
+          description: Trabajo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Job' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /jobs/{job}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    post:
+      tags: [Trabajos]
+      summary: Cancelar un trabajo
+      description: Un trabajo en ejecución se cancela de forma cooperativa (202); el worker detiene FFmpeg en pocos segundos.
+      responses:
+        '200':
+          description: Cancelado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Job' }
+        '202':
+          description: Cancelación solicitada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Job' }
+        '409':
+          description: El trabajo ya ha finalizado (`job_not_cancellable`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /jobs/{job}/result:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    get:
+      tags: [Trabajos]
+      summary: Resultado de un trabajo completado
+      responses:
+        '200':
+          description: Resultado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/JobResult' }
+        '409':
+          description: El trabajo no está `completed` (`job_not_completed`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /jobs/{job}/logs:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    get:
+      tags: [Trabajos]
+      summary: Historial de estados (máx. 500 eventos)
+      responses:
+        '200':
+          description: Eventos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/JobEvent' } }
+
+  /webhooks:
+    post:
+      tags: [Webhooks]
+      summary: Registrar un webhook
+      description: |
+        Devuelve el secreto de firma (`secret`) una única vez. En producción solo se admite https y la URL
+        no puede apuntar a redes privadas, loopback ni metadatos cloud. Máximo 10 por cliente.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WebhookInput' }
+      responses:
+        '201':
+          description: Creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/WebhookWithSecret' }
+        '422':
+          description: URL insegura o datos no válidos (`validation_failed`), límite alcanzado (`webhook_limit_exceeded`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    get:
+      tags: [Webhooks]
+      summary: Listar webhooks
+      responses:
+        '200':
+          description: Webhooks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Webhook' } }
+  /webhooks/{webhook}:
+    parameters:
+      - $ref: '#/components/parameters/WebhookId'
+    get:
+      tags: [Webhooks]
+      summary: Consultar un webhook
+      responses:
+        '200':
+          description: Webhook
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Webhook' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Webhooks]
+      summary: Modificar URL, eventos, descripción o estado
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url: { type: string, format: uri, maxLength: 2048 }
+                description: { type: [string, 'null'], maxLength: 255 }
+                events: { type: array, minItems: 1, items: { $ref: '#/components/schemas/WebhookEventType' } }
+                is_active: { type: boolean }
+      responses:
+        '200':
+          description: Actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Webhook' }
+        '422': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [Webhooks]
+      summary: Eliminar un webhook (las entregas pendientes se marcan como fallidas)
+      responses:
+        '204': { description: Eliminado }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /webhooks/{webhook}/rotate-secret:
+    parameters:
+      - $ref: '#/components/parameters/WebhookId'
+    post:
+      tags: [Webhooks]
+      summary: Rotar el secreto de firma
+      description: Durante `grace_minutes` (24 h por defecto) cada envío lleva dos firmas `v1`, con el secreto nuevo y con el anterior.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                grace_minutes: { type: integer, minimum: 0, maximum: 10080 }
+      responses:
+        '200':
+          description: Secreto nuevo (se muestra una única vez)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/WebhookWithSecret' }
+  /webhooks/{webhook}/ping:
+    parameters:
+      - $ref: '#/components/parameters/WebhookId'
+    post:
+      tags: [Webhooks]
+      summary: Enviar un evento de prueba `webhook.ping`
+      responses:
+        '202':
+          description: Entrega creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/WebhookDelivery' }
+  /webhooks/{webhook}/deliveries:
+    parameters:
+      - $ref: '#/components/parameters/WebhookId'
+    get:
+      tags: [Webhooks]
+      summary: Historial de entregas
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, succeeded, failed] }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Página de entregas
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CursorPage'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/WebhookDelivery' } }
+  /webhooks/{webhook}/deliveries/{delivery}/redeliver:
+    parameters:
+      - $ref: '#/components/parameters/WebhookId'
+      - name: delivery
+        in: path
+        required: true
+        schema: { type: string, example: dlv_01jb8x0c5m3v6r2q7t9w4y1z8a }
+    post:
+      tags: [Webhooks]
+      summary: Reenviar una entrega finalizada (reinicia sus intentos)
+      responses:
+        '202':
+          description: Reenvío programado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/WebhookDelivery' }
+
+webhooks:
+  jobEvent:
+    post:
+      summary: Notificación de fin de trabajo
+      description: |
+        Se envía a los webhooks suscritos cuando un trabajo termina. Si el trabajo se creó con `webhook_url`,
+        solo se notifica a ese webhook. Entrega at-least-once: deduplica por `MediaForge-Event-Id`.
+        Responde 2xx en menos de 10 s; cualquier otra respuesta o timeout se reintenta
+        (10 s, 1 min, 5 min, 30 min, 2 h; 6 intentos en total). No se siguen redirecciones.
+      parameters:
+        - { name: MediaForge-Signature, in: header, required: true, schema: { type: string, example: 't=1730000000,v1=5257a869e7ecebeda32affa62cdca3fa51cad7e77a0e56ff536d0ce8e108d8bd' } }
+        - { name: MediaForge-Event-Id, in: header, required: true, schema: { type: string } }
+        - { name: MediaForge-Event-Type, in: header, required: true, schema: { $ref: '#/components/schemas/WebhookEventType' } }
+        - { name: MediaForge-Delivery-Id, in: header, required: true, schema: { type: string } }
+        - { name: MediaForge-Delivery-Attempt, in: header, required: true, schema: { type: integer } }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WebhookPayload' }
+      responses:
+        '200': { description: Recibido }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: 'Clave de API creada con `php artisan mediaforge:client:create` (formato `mfk_...`).'
+
+  parameters:
+    FileId:
+      name: file
+      in: path
+      required: true
+      schema: { type: string, pattern: '^file_[0-9a-z]{26}$' }
+    JobId:
+      name: job
+      in: path
+      required: true
+      schema: { type: string, pattern: '^job_[0-9a-z]{26}$' }
+    WebhookId:
+      name: webhook
+      in: path
+      required: true
+      schema: { type: string, pattern: '^whk_[0-9a-z]{26}$' }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+    Cursor:
+      name: cursor
+      in: query
+      description: Valor de `meta.next_cursor` de la página anterior.
+      schema: { type: string }
+
+  responses:
+    Unauthenticated:
+      description: Credenciales ausentes o no válidas (`unauthenticated`), o cliente suspendido (403 `client_suspended`)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: No existe o pertenece a otro cliente (`not_found`)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code:
+              type: string
+              enum: [validation_failed, unauthenticated, client_suspended, forbidden, not_found, method_not_allowed, rate_limited,
+                     active_jobs_limit_exceeded, storage_quota_exceeded, file_too_large, unsupported_media_type, media_limit_exceeded,
+                     upload_failed, insufficient_storage, file_in_use, webhook_limit_exceeded, idempotency_key_reused,
+                     invalid_idempotency_key, job_not_cancellable, job_not_completed, service_unavailable, http_error, internal_error]
+            message: { type: string }
+            details:
+              description: 'En `validation_failed`, mapa campo → lista de mensajes.'
+              type: object
+              additionalProperties: true
+            request_id: { type: string }
+
+    CursorPage:
+      type: object
+      properties:
+        links:
+          type: object
+          properties:
+            next: { type: [string, 'null'] }
+            prev: { type: [string, 'null'] }
+        meta:
+          type: object
+          properties:
+            per_page: { type: integer }
+            next_cursor: { type: [string, 'null'] }
+            prev_cursor: { type: [string, 'null'] }
+
+    Health:
+      type: object
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        checks:
+          type: object
+          additionalProperties: { type: string }
+
+    OperationName:
+      type: string
+      enum: [analyze, compress, convert, resize, trim, extract_audio, thumbnail]
+    ProfileId:
+      type: string
+      enum: [generic-web, instagram-reels, tiktok, youtube-shorts, youtube-standard]
+
+    Operation:
+      type: object
+      properties:
+        name: { $ref: '#/components/schemas/OperationName' }
+        description: { type: string }
+        input_types: { type: array, items: { type: string } }
+        output_formats: { type: array, items: { type: string } }
+        constraints: { type: object }
+        parameters:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              type: { type: string, enum: [string, integer, number, boolean] }
+              description: { type: string }
+              required: { type: boolean }
+              default: {}
+              enum: { type: [array, 'null'] }
+              min: { type: [number, 'null'] }
+              max: { type: [number, 'null'] }
+              pattern: { type: [string, 'null'] }
+
+    Profile:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/ProfileId' }
+        version: { type: integer }
+        description: { type: string }
+        operations: { type: array, items: { $ref: '#/components/schemas/OperationName' } }
+        parameters: { type: object, description: Parámetros por defecto que aplica el perfil }
+        max_duration_seconds: { type: [integer, 'null'] }
+
+    MediaMetadata:
+      type: object
+      properties:
+        container: { type: string, example: 'mov,mp4,m4a,3gp,3g2,mj2' }
+        duration_seconds: { type: [number, 'null'] }
+        size_bytes: { type: integer }
+        bitrate: { type: [integer, 'null'] }
+        has_video: { type: boolean }
+        has_audio: { type: boolean }
+        width: { type: [integer, 'null'], description: Ya con la rotación aplicada }
+        height: { type: [integer, 'null'] }
+        fps: { type: [number, 'null'] }
+        video_codec: { type: [string, 'null'], example: h264 }
+        audio_codec: { type: [string, 'null'], example: aac }
+        audio_channels: { type: [integer, 'null'] }
+        audio_sample_rate: { type: [integer, 'null'] }
+        rotation: { type: integer }
+
+    File:
+      type: object
+      properties:
+        id: { type: string, example: file_01jb8x0c5m3v6r2q7t9w4y1z8a }
+        object: { const: file }
+        kind: { type: string, enum: [original, result, thumbnail] }
+        original_name: { type: [string, 'null'] }
+        extension: { type: string }
+        mime_type: { type: string }
+        size_bytes: { type: integer }
+        checksum_sha256: { type: string }
+        metadata: { oneOf: [{ $ref: '#/components/schemas/MediaMetadata' }, { type: 'null' }] }
+        expires_at: { type: [string, 'null'], format: date-time, description: Se elimina automáticamente después }
+        created_at: { type: string, format: date-time }
+        links:
+          type: object
+          properties:
+            self: { type: string, format: uri }
+            download: { type: string, format: uri }
+
+    JobStatus:
+      type: string
+      enum: [pending, queued, processing, retrying, completed, failed, cancelled]
+
+    CreateJob:
+      type: object
+      required: [file_id, operation]
+      properties:
+        file_id: { type: string, pattern: '^file_[0-9a-z]{26}$' }
+        operation: { $ref: '#/components/schemas/OperationName' }
+        profile:
+          $ref: '#/components/schemas/ProfileId'
+        parameters:
+          type: object
+          description: Parámetros de la operación (ver `GET /operations/{operation}`). Sobrescriben los del perfil.
+          additionalProperties: true
+        priority: { type: string, enum: [low, normal, high], default: normal }
+        reference: { type: [string, 'null'], maxLength: 191, description: Identificador propio del cliente (p. ej. id del post) }
+        scheduled_at: { type: [string, 'null'], format: date-time, description: No se procesa antes de esta fecha }
+        processing_deadline: { type: [string, 'null'], format: date-time, description: Informativo; se registra el retraso si se supera }
+        webhook_url:
+          type: [string, 'null']
+          description: URL exacta de un webhook activo del cliente. Si se indica, solo ese webhook recibe los eventos del trabajo.
+
+    Job:
+      type: object
+      properties:
+        id: { type: string, example: job_01jb8x0c5m3v6r2q7t9w4y1z8a }
+        object: { const: job }
+        status: { $ref: '#/components/schemas/JobStatus' }
+        operation: { $ref: '#/components/schemas/OperationName' }
+        profile: { type: [string, 'null'] }
+        profile_version: { type: [integer, 'null'] }
+        parameters: { type: object, description: Parámetros efectivos (perfil + petición + valores por defecto) }
+        priority: { type: string, enum: [low, normal, high] }
+        reference: { type: [string, 'null'] }
+        webhook_url: { type: [string, 'null'] }
+        file_id: { type: string }
+        progress: { type: [integer, 'null'], minimum: 0, maximum: 100 }
+        attempts: { type: integer }
+        max_attempts: { type: integer }
+        cancel_requested: { type: boolean }
+        error:
+          type: [object, 'null']
+          properties:
+            code:
+              type: string
+              enum: [input_not_found, input_invalid, input_unsupported, processing_failed, processing_timeout, internal_error]
+            message: { type: string }
+        scheduled_at: { type: [string, 'null'], format: date-time }
+        processing_deadline: { type: [string, 'null'], format: date-time }
+        deadline_missed_by_seconds: { type: [integer, 'null'] }
+        estimated_completion_at: { type: [string, 'null'], format: date-time, description: Estimación basada en el histórico; null si no hay datos suficientes }
+        created_at: { type: string, format: date-time }
+        queued_at: { type: [string, 'null'], format: date-time }
+        started_at: { type: [string, 'null'], format: date-time }
+        finished_at: { type: [string, 'null'], format: date-time }
+        processing_ms: { type: [integer, 'null'] }
+        links:
+          type: object
+          properties:
+            self: { type: string, format: uri }
+            result: { type: string, format: uri }
+            cancel: { type: string, format: uri }
+            logs: { type: string, format: uri }
+
+    JobResult:
+      type: object
+      properties:
+        object: { const: job_result }
+        job_id: { type: string }
+        operation: { $ref: '#/components/schemas/OperationName' }
+        result:
+          type: object
+          description: 'En `analyze`, `media` contiene los metadatos. En el resto, `input` y `outputs`.'
+          properties:
+            operation: { type: string }
+            media: { $ref: '#/components/schemas/MediaMetadata' }
+            input: { $ref: '#/components/schemas/MediaMetadata' }
+            outputs:
+              type: array
+              items:
+                type: object
+                properties:
+                  file_id: { type: string }
+                  kind: { type: string, enum: [result, thumbnail] }
+                  format: { type: string }
+                  mime_type: { type: string }
+                  size_bytes: { type: integer }
+                  metadata: { $ref: '#/components/schemas/MediaMetadata' }
+        outputs: { type: array, items: { $ref: '#/components/schemas/File' } }
+
+    JobEvent:
+      type: object
+      properties:
+        object: { const: job_event }
+        type: { type: string, example: status_changed }
+        from_status: { oneOf: [{ $ref: '#/components/schemas/JobStatus' }, { type: 'null' }] }
+        to_status: { oneOf: [{ $ref: '#/components/schemas/JobStatus' }, { type: 'null' }] }
+        message: { type: [string, 'null'] }
+        context: { type: [object, 'null'] }
+        created_at: { type: string, format: date-time }
+
+    WebhookEventType:
+      type: string
+      enum: [job.completed, job.failed, job.cancelled]
+
+    WebhookInput:
+      type: object
+      required: [url, events]
+      properties:
+        url: { type: string, format: uri, maxLength: 2048, example: 'https://socialai.example.com/webhooks/mediaforge' }
+        description: { type: [string, 'null'], maxLength: 255 }
+        events: { type: array, minItems: 1, items: { $ref: '#/components/schemas/WebhookEventType' } }
+        is_active: { type: boolean, default: true }
+
+    Webhook:
+      type: object
+      properties:
+        id: { type: string, example: whk_01jb8x0c5m3v6r2q7t9w4y1z8a }
+        object: { const: webhook }
+        url: { type: string }
+        description: { type: [string, 'null'] }
+        events: { type: array, items: { $ref: '#/components/schemas/WebhookEventType' } }
+        is_active: { type: boolean }
+        previous_secret_expires_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    WebhookWithSecret:
+      allOf:
+        - $ref: '#/components/schemas/Webhook'
+        - type: object
+          properties:
+            secret: { type: string, example: whsec_Q2hhbmdlTWVQbGVhc2VUaGlzSXNOb3RSZWFs }
+
+    WebhookDelivery:
+      type: object
+      properties:
+        id: { type: string, example: dlv_01jb8x0c5m3v6r2q7t9w4y1z8a }
+        object: { const: webhook_delivery }
+        event_id: { type: string }
+        event_type: { type: string }
+        job_id: { type: [string, 'null'] }
+        status: { type: string, enum: [pending, succeeded, failed] }
+        attempts: { type: integer }
+        last_status_code: { type: [integer, 'null'] }
+        last_error: { type: [string, 'null'] }
+        last_duration_ms: { type: [integer, 'null'] }
+        next_attempt_at: { type: [string, 'null'], format: date-time }
+        delivered_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+
+    WebhookPayload:
+      type: object
+      properties:
+        id: { type: string, example: evt_01jb8x0c5m3v6r2q7t9w4y1z8a }
+        object: { const: event }
+        type: { type: string, enum: [job.completed, job.failed, job.cancelled, webhook.ping] }
+        created_at: { type: string, format: date-time }
+        data:
+          type: object
+          properties:
+            job: { $ref: '#/components/schemas/Job' }
+            webhook_id: { type: string, description: Solo en webhook.ping }

@@ -10,7 +10,7 @@ FROM php:${PHP_VERSION}-fpm-alpine AS base
 COPY --from=mlocati/php-extension-installer:2 /usr/bin/install-php-extensions /usr/local/bin/
 
 RUN apk add --no-cache ffmpeg fcgi \
-    && install-php-extensions bcmath exif intl opcache pcntl pdo_mysql zip
+    && install-php-extensions bcmath exif intl opcache pcntl pdo_mysql redis zip
 
 ENV PHP_MEMORY_LIMIT=512M \
     PHP_UPLOAD_MAX_FILESIZE=2048M \

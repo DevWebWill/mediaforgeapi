@@ -1,8 +1,18 @@
 <?php
 
-use Illuminate\Foundation\Inspiring;
-use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schedule;
 
-Artisan::command('inspire', function () {
-    $this->comment(Inspiring::quote());
-})->purpose('Display an inspiring quote');
+// Reenvía trabajos con el mensaje perdido o cuyo worker murió
+Schedule::command('mediaforge:jobs:recover')
+    ->everyMinute()
+    ->withoutOverlapping(10)
+    ->onOneServer();
+
+// Retención de archivos, temporales huérfanos y claves de idempotencia
+Schedule::command('mediaforge:cleanup')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping(60)
+    ->onOneServer();
+
+// Mantenimiento de la cola de Laravel
+Schedule::command('queue:prune-failed --hours=720')->daily();

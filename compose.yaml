@@ -5,9 +5,16 @@ x-php-env: &php-env
   DB_CONNECTION: mysql
   DB_HOST: mysql
   DB_PORT: 3306
-  QUEUE_CONNECTION: database
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  QUEUE_CONNECTION: redis
+  CACHE_STORE: redis
   # Debe ser mayor que QUEUE_TIMEOUT para no reintentar jobs aún en ejecución
-  DB_QUEUE_RETRY_AFTER: ${DB_QUEUE_RETRY_AFTER:-3700}
+  REDIS_QUEUE_RETRY_AFTER: ${REDIS_QUEUE_RETRY_AFTER:-3700}
+  # El worker espera jobs con BLPOP en lugar de sondear Redis
+  REDIS_QUEUE_BLOCK_FOR: ${REDIS_QUEUE_BLOCK_FOR:-1}
+  # Los jobs despachados dentro de una transacción esperan a su commit
+  REDIS_QUEUE_AFTER_COMMIT: ${REDIS_QUEUE_AFTER_COMMIT:-true}
 
 # Configuración común para los contenedores PHP (API, colas y scheduler)
 x-php: &php
@@ -32,6 +39,8 @@ x-php: &php
     - mediaforge
   depends_on:
     mysql:
+      condition: service_healthy
+    redis:
       condition: service_healthy
 
 services:
@@ -69,13 +78,13 @@ services:
       timeout: 5s
       retries: 3
 
-  # Worker de colas de Laravel (driver database) para el procesamiento de vídeo
+  # Worker de colas de Laravel (conexión redis) para el procesamiento de vídeo
   # Escalable con: docker compose up -d --scale queue=N
   queue:
     <<: *php
     command: >
-      php artisan queue:work database
-      --queue=${QUEUE_NAMES:-media,default}
+      php artisan queue:work redis
+      --queue=${QUEUE_NAMES:-media-high,media,media-low,default}
       --tries=${QUEUE_TRIES:-3}
       --timeout=${QUEUE_TIMEOUT:-3600}
       --max-time=3600
@@ -84,6 +93,34 @@ services:
       <<: *php-env
       CONTAINER_ROLE: worker
     stop_grace_period: 2m
+    # FFmpeg puede consumir toda la CPU/RAM: se acota para no degradar API y BD
+    deploy:
+      resources:
+        limits:
+          cpus: "${QUEUE_CPUS:-3}"
+          memory: ${QUEUE_MEMORY:-4g}
+    depends_on:
+      app:
+        condition: service_healthy
+
+  # Entregas de webhooks: worker ligero separado para que FFmpeg no retrase las notificaciones
+  queue-webhooks:
+    <<: *php
+    command: >
+      php artisan queue:work redis
+      --queue=${MEDIAFORGE_WEBHOOK_QUEUE:-webhooks}
+      --timeout=60
+      --max-time=3600
+      --sleep=1
+    environment:
+      <<: *php-env
+      CONTAINER_ROLE: worker
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
     depends_on:
       app:
         condition: service_healthy
@@ -110,7 +147,7 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
     ports:
-      - "${FORWARD_DB_PORT:-3307}:3306"
+      - "127.0.0.1:${FORWARD_DB_PORT:-3307}:3306"
     volumes:
       - mysql-data:/var/lib/mysql
     networks:
@@ -122,6 +159,35 @@ services:
       retries: 10
       start_period: 30s
 
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?Define REDIS_PASSWORD en .env}
+      # Persistencia para no perder jobs encolados al reiniciar
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      # Nunca expulsar claves: perder un job es peor que un error por memoria llena
+      - --maxmemory-policy
+      - noeviction
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+    ports:
+      - "127.0.0.1:${FORWARD_REDIS_PORT:-6380}:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - mediaforge
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
 networks:
   # Nombre fijo para que otros proyectos (p. ej. socialaiapi) puedan unirse como red externa
   mediaforge:
@@ -129,3 +195,4 @@ networks:
 
 volumes:
   mysql-data:
+  redis-data:
