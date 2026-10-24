@@ -39,7 +39,12 @@ class FfmpegProcessingTest extends TestCase
             ->assertJsonPath('data.metadata.width', 320)
             ->assertJsonPath('data.metadata.height', 240)
             ->assertJsonPath('data.metadata.has_audio', true)
-            ->assertJsonPath('data.metadata.video_codec', 'h264');
+            ->assertJsonPath('data.metadata.video_codec', 'h264')
+            ->assertJsonPath('data.metadata.inspection.streams.0.codec_name', 'h264')
+            ->assertJsonPath('data.metadata.inspection.streams.0.pix_fmt', 'yuv420p')
+            ->assertJsonMissingPath('data.metadata.inspection.format.filename')
+            ->assertJsonMissingPath('data.metadata.inspection.format.tags')
+            ->assertJsonMissingPath('data.metadata.inspection.streams.0.tags');
     }
 
     public function test_corrupt_upload_is_rejected_and_not_stored(): void

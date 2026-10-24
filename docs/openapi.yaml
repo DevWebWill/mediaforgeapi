@@ -712,6 +712,43 @@ components:
         audio_channels: { type: [integer, 'null'] }
         audio_sample_rate: { type: [integer, 'null'] }
         rotation: { type: integer }
+        streams: { type: integer, description: Numero total de pistas }
+        inspection:
+          type: [object, 'null']
+          description: >-
+            Datos de ffprobe para validacion estricta del archivo, disponibles tras
+            subirlo sin crear un trabajo analyze. No incluye rutas, etiquetas ni
+            metadatos arbitrarios. El cliente puede vincularlos a los bytes mediante
+            checksum_sha256 y size_bytes del recurso y eliminar la copia temporal.
+          properties:
+            format:
+              type: object
+              properties:
+                duration: { type: string }
+                format_name: { type: string }
+            streams:
+              type: array
+              items:
+                type: object
+                properties:
+                  codec_type: { type: string }
+                  codec_name: { type: string }
+                  profile: { type: string }
+                  width: { type: integer }
+                  height: { type: integer }
+                  avg_frame_rate: { type: string }
+                  pix_fmt: { type: string }
+                  field_order: { type: string }
+                  sample_aspect_ratio: { type: string }
+                  bit_rate: { type: string }
+                  sample_rate: { type: string }
+                  channels: { type: integer }
+                  side_data_list:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        rotation: { type: integer }
 
     File:
       type: object

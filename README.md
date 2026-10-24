@@ -133,6 +133,14 @@ Errores del trabajo:
 
 ## Robustez y operación
 
+La subida de un archivo devuelve `metadata.inspection`: formato y pistas
+inspeccionados por ffprobe (códecs, FPS racionales, formato de píxel, entrelazado,
+SAR, bitrates, audio y rotación). No expone rutas internas ni etiquetas arbitrarias.
+Permite a un cliente validar el archivo sin instalar ffprobe ni crear un trabajo
+`analyze`. Verificar `checksum_sha256` y `size_bytes` y eliminar la copia temporal
+con `DELETE /api/v1/files/{id}`; mantener retención finita y el scheduler activo
+para recuperar copias de subidas cuya respuesta se pierda por una desconexión.
+
 - **Concurrencia**: como máximo `MEDIAFORGE_MAX_CONCURRENT_JOBS` FFmpeg simultáneos en total, aunque se escale `queue`. Los trabajos que esperan hueco no gastan intentos.
 - **Recuperación** (`mediaforge:jobs:recover`, cada minuto): reencola trabajos `pending` que no llegaron a Redis, `queued` o `retrying` perdidos, y `processing` sin heartbeat porque el worker murió.
 - **Limpieza** (`mediaforge:cleanup`, cada 15 min): borra archivos caducados que no estén en uso, temporales huérfanos y claves de idempotencia caducadas.

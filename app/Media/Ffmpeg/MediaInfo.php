@@ -25,6 +25,7 @@ final readonly class MediaInfo
         public ?int $audioSampleRate,
         public int $rotation,
         public int $streamCount,
+        public ?array $inspection = null,
     ) {}
 
     /** @return array<string, mixed> */
@@ -46,6 +47,7 @@ final readonly class MediaInfo
             'audio_sample_rate' => $this->audioSampleRate,
             'rotation' => $this->rotation,
             'streams' => $this->streamCount,
+            'inspection' => $this->inspection,
         ];
     }
 }

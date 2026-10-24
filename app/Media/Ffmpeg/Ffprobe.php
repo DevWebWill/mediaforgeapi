@@ -119,6 +119,21 @@ class Ffprobe
             audioSampleRate: $this->positiveInt($audio['sample_rate'] ?? null),
             rotation: $rotation,
             streamCount: count($streams),
+            inspection: [
+                'format' => array_intersect_key($format, array_flip(['duration', 'format_name'])),
+                'streams' => array_map(static function (array $stream): array {
+                    $fields = array_intersect_key($stream, array_flip([
+                        'codec_type', 'codec_name', 'profile', 'width', 'height', 'avg_frame_rate',
+                        'pix_fmt', 'field_order', 'sample_aspect_ratio', 'bit_rate', 'sample_rate', 'channels',
+                    ]));
+                    $fields['side_data_list'] = array_map(
+                        static fn (array $sideData): array => array_intersect_key($sideData, ['rotation' => true]),
+                        $stream['side_data_list'] ?? [],
+                    );
+
+                    return $fields;
+                }, $streams),
+            ],
         );
     }
 
