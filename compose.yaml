@@ -97,7 +97,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${QUEUE_CPUS:-3}"
+          cpus: "${QUEUE_CPUS:-1}"
           memory: ${QUEUE_MEMORY:-4g}
     depends_on:
       app:

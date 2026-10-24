@@ -161,7 +161,7 @@ Las colas y la caché usan Redis; los jobs fallidos se guardan en MySQL (`php ar
 |----------------------------|-----------------|---------------------------------------------------------|
 | `QUEUE_NAMES`              | `media-high,media,media-low,default` | Colas que procesa el worker, por prioridad              |
 | `QUEUE_TIMEOUT`            | `3600`          | Segundos máximos por job (`MEDIAFORGE_JOB_TIMEOUT`=3500 debe ser menor) |
-| `QUEUE_CPUS` / `QUEUE_MEMORY` | `3` / `4g`   | Límite de recursos del worker FFmpeg                    |
+| `QUEUE_CPUS` / `QUEUE_MEMORY` | `1` / `4g`   | Límite de recursos por worker FFmpeg; ajustar a la capacidad disponible para Docker |
 | `REDIS_QUEUE_RETRY_AFTER`  | `3700`          | Debe ser mayor que `QUEUE_TIMEOUT`                      |
 | `REDIS_QUEUE_AFTER_COMMIT` | `true`          | Los jobs despachados en una transacción esperan al commit |
 
