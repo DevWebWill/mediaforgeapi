@@ -1,59 +1,74 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# MediaForge API
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+API en Laravel 12 para el procesamiento de vídeos (FFmpeg) mediante colas de Laravel.
 
-## About Laravel
+## Stack
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+| Servicio    | Descripción                                   |
+|-------------|-----------------------------------------------|
+| `app`       | PHP 8.5 FPM + FFmpeg                          |
+| `nginx`     | Servidor web (`http://localhost:8081`)        |
+| `mysql`     | MySQL 8.4 (base de datos y colas)             |
+| `queue`     | Worker de colas de Laravel (driver `database`) |
+| `scheduler` | `php artisan schedule:work`                   |
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Puesta en marcha
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
 
-## Learning Laravel
+Al arrancar, `app` instala dependencias (si falta `vendor/`), genera `APP_KEY` si está vacía y ejecuta las migraciones (`RUN_MIGRATIONS=true`).
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+Comprobar estado: `curl http://localhost:8081/up`
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+## Comandos habituales
 
-## Laravel Sponsors
+```bash
+docker compose exec app php artisan <comando>
+docker compose exec app composer <comando>
+docker compose logs -f queue
+docker compose restart queue                 # tras cambiar código de los jobs
+docker compose up -d --scale queue=3         # más workers en paralelo
+docker compose down                          # parar (añadir -v para borrar datos)
+```
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+## Colas
 
-### Premium Partners
+Los jobs se encolan en la cola `media`:
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+```php
+ProcessVideo::dispatch($video)->onQueue('media');
+```
 
-## Contributing
+Variables en `.env`: `QUEUE_NAMES`, `QUEUE_TIMEOUT` (segundos por job), `QUEUE_TRIES` y `DB_QUEUE_RETRY_AFTER` (debe ser mayor que `QUEUE_TIMEOUT`).
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## Variables Docker (`.env`)
 
-## Code of Conduct
+| Variable           | Por defecto | Uso                                  |
+|--------------------|-------------|--------------------------------------|
+| `APP_PORT`         | `8081`      | Puerto HTTP en el host               |
+| `FORWARD_DB_PORT`  | `3307`      | Puerto MySQL en el host              |
+| `DB_ROOT_PASSWORD` | —           | Contraseña root de MySQL             |
+| `HOST_UID/GID`     | `1000`      | Usuario de los contenedores PHP      |
+| `APP_BUILD_TARGET` | `dev`       | `dev` o `prod`                       |
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+## Integración con otros servicios
 
-## Security Vulnerabilities
+Los contenedores comparten la red `mediaforge-network`. Otro proyecto (p. ej. socialaiapi) puede unirse a ella como red externa y llamar a la API en `http://mediaforge-api`:
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+```yaml
+networks:
+  mediaforge:
+    external: true
+    name: mediaforge-network
+```
 
-## License
+## Producción
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+```bash
+APP_BUILD_TARGET=prod APP_IMAGE_TAG=1.0 docker compose build
+```
+
+La imagen `prod` incluye el código y las dependencias sin las de desarrollo, con OPcache sin revalidación y `php artisan optimize` al arrancar. En producción no se debe montar el código como volumen.

@@ -1,0 +1,131 @@
+name: mediaforge
+
+# Variables que apuntan a los servicios internos (sobrescriben las de .env)
+x-php-env: &php-env
+  DB_CONNECTION: mysql
+  DB_HOST: mysql
+  DB_PORT: 3306
+  QUEUE_CONNECTION: database
+  # Debe ser mayor que QUEUE_TIMEOUT para no reintentar jobs aún en ejecución
+  DB_QUEUE_RETRY_AFTER: ${DB_QUEUE_RETRY_AFTER:-3700}
+
+# Configuración común para los contenedores PHP (API, colas y scheduler)
+x-php: &php
+  build:
+    context: .
+    dockerfile: docker/php/Dockerfile
+    target: ${APP_BUILD_TARGET:-dev}
+    args:
+      UID: ${HOST_UID:-1000}
+      GID: ${HOST_GID:-1000}
+  image: mediaforge/api:${APP_IMAGE_TAG:-dev}
+  restart: unless-stopped
+  init: true
+  env_file:
+    - path: .env
+      required: true
+  environment:
+    <<: *php-env
+  volumes:
+    - ./:/var/www/html
+  networks:
+    - mediaforge
+  depends_on:
+    mysql:
+      condition: service_healthy
+
+services:
+  app:
+    <<: *php
+    environment:
+      <<: *php-env
+      CONTAINER_ROLE: app
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-false}
+    healthcheck:
+      test: ["CMD-SHELL", "SCRIPT_NAME=/fpm-ping SCRIPT_FILENAME=/fpm-ping REQUEST_METHOD=GET cgi-fcgi -bind -connect 127.0.0.1:9000 | grep -q pong"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  nginx:
+    image: nginx:1.30-alpine
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8081}:80"
+    volumes:
+      - ./:/var/www/html:ro
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      mediaforge:
+        aliases:
+          - mediaforge-api
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/up || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # Worker de colas de Laravel (driver database) para el procesamiento de vídeo
+  # Escalable con: docker compose up -d --scale queue=N
+  queue:
+    <<: *php
+    command: >
+      php artisan queue:work database
+      --queue=${QUEUE_NAMES:-media,default}
+      --tries=${QUEUE_TRIES:-3}
+      --timeout=${QUEUE_TIMEOUT:-3600}
+      --max-time=3600
+      --sleep=3
+    environment:
+      <<: *php-env
+      CONTAINER_ROLE: worker
+    stop_grace_period: 2m
+    depends_on:
+      app:
+        condition: service_healthy
+
+  scheduler:
+    <<: *php
+    command: php artisan schedule:work
+    environment:
+      <<: *php-env
+      CONTAINER_ROLE: scheduler
+    depends_on:
+      app:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE:-mediaforgeapi}
+      MYSQL_USER: ${DB_USERNAME:-mediaforge}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?Define DB_PASSWORD en .env}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-${DB_PASSWORD}}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "${FORWARD_DB_PORT:-3307}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - mediaforge
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+networks:
+  # Nombre fijo para que otros proyectos (p. ej. socialaiapi) puedan unirse como red externa
+  mediaforge:
+    name: mediaforge-network
+
+volumes:
+  mysql-data:
