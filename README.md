@@ -21,6 +21,15 @@ cp .env.example .env   # cambiar DB_PASSWORD, DB_ROOT_PASSWORD y REDIS_PASSWORD
 docker compose up -d --build
 ```
 
+El servicio auxiliar `permissions` prepara automáticamente `storage` y
+`bootstrap/cache` antes de iniciar Laravel, tanto en desarrollo como en producción.
+Solo ese contenedor se ejecuta como root, sin red ni credenciales de la aplicación;
+la API y los workers siguen como `www-data`. Usa el UID/GID de la imagen elegida,
+por lo que también funciona tras cambiar de servidor o de imagen `dev` a `prod`.
+Si no puede ajustar permisos, el arranque se detiene con el error correspondiente.
+El ajuste ocurre en `up`, no durante `build`; no requiere comandos manuales
+`chown`/`chmod`. Las carpetas montadas deben permitir cambiar propietario y permisos.
+
 Al arrancar, `app` instala dependencias (si falta `vendor/`), genera `APP_KEY` si está vacía y ejecuta las migraciones (`RUN_MIGRATIONS=true`).
 
 Comprobar estado: `curl http://localhost:8081/up`

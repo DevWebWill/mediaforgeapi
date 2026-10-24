@@ -18,7 +18,7 @@ x-php-env: &php-env
 
 # Configuración común para los contenedores PHP (API, colas y scheduler)
 x-php: &php
-  build:
+  build: &php-build
     context: .
     dockerfile: docker/php/Dockerfile
     target: ${APP_BUILD_TARGET:-dev}
@@ -44,12 +44,30 @@ x-php: &php
       condition: service_healthy
 
 services:
+  permissions:
+    build: *php-build
+    image: mediaforge/api:${APP_IMAGE_TAG:-dev}
+    user: root
+    restart: "no"
+    entrypoint: ["/usr/local/bin/init-permissions"]
+    volumes:
+      - ./storage:/var/www/html/storage
+      - ./bootstrap/cache:/var/www/html/bootstrap/cache
+    network_mode: none
+
   app:
     <<: *php
     environment:
       <<: *php-env
       CONTAINER_ROLE: app
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-false}
+    depends_on:
+      permissions:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "SCRIPT_NAME=/fpm-ping SCRIPT_FILENAME=/fpm-ping REQUEST_METHOD=GET cgi-fcgi -bind -connect 127.0.0.1:9000 | grep -q pong"]
       interval: 10s

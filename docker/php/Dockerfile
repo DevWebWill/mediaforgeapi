@@ -27,6 +27,7 @@ ENV PHP_MEMORY_LIMIT=512M \
 COPY docker/php/conf.d/app.ini "$PHP_INI_DIR/conf.d/zz-app.ini"
 COPY docker/php/php-fpm.d/zz-app.conf /usr/local/etc/php-fpm.d/zz-app.conf
 COPY --chmod=755 docker/php/entrypoint.sh /usr/local/bin/entrypoint
+COPY --chmod=755 docker/php/init-permissions.sh /usr/local/bin/init-permissions
 
 WORKDIR /var/www/html
 
