@@ -58,6 +58,9 @@ class CommandBuilder
      */
     private function encode(array $p, MediaInfo $info, string $input, array $filters, array $inputOptions = [], array $outputOptions = [], ?float $expectedDuration = null): FfmpegPlan
     {
+        if ($p['deinterlace'] ?? false) {
+            array_unshift($filters, 'yadif=mode=send_frame:parity=auto:deint=all');
+        }
         if (isset($p['fps'])) {
             $filters[] = 'fps='.$this->number((float) $p['fps']);
         }
@@ -76,7 +79,10 @@ class CommandBuilder
             ...$outputOptions,
             '-vf', implode(',', $filters),
             ...$this->videoCodec($p, $format),
+            ...(isset($p['max_video_bitrate_kbps']) ? ['-maxrate', $p['max_video_bitrate_kbps'].'k', '-bufsize', ($p['max_video_bitrate_kbps'] * 2).'k'] : []),
             ...($info->hasAudio ? $this->audioCodec((string) $p['audio_codec'], (int) $p['audio_bitrate_kbps']) : ['-an']),
+            ...($info->hasAudio && isset($p['audio_sample_rate']) ? ['-ar', (string) $p['audio_sample_rate']] : []),
+            ...($info->hasAudio && isset($p['audio_channels']) ? ['-ac', (string) $p['audio_channels']] : []),
             ...$this->muxer($format),
             $output->filename,
         ];
@@ -236,6 +242,14 @@ class CommandBuilder
     {
         $crf = (string) (int) $p['crf'];
         $preset = (string) ($p['preset'] ?? 'medium');
+        if (isset($p['constant_video_bitrate_kbps'])) {
+            $bitrate = $p['constant_video_bitrate_kbps'].'k';
+
+            return ['-c:v', 'libx264', '-preset', $preset, '-profile:v', 'high',
+                '-b:v', $bitrate, '-minrate', $bitrate, '-maxrate', $bitrate,
+                '-bufsize', ($p['constant_video_bitrate_kbps'] * 2).'k',
+                '-x264-params', 'nal-hrd=cbr:filler=1'];
+        }
 
         return match ($p['video_codec']) {
             'h265' => [

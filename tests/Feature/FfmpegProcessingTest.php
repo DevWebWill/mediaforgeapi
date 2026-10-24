@@ -9,6 +9,7 @@ use App\Models\MediaJob;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 /**
@@ -98,6 +99,11 @@ class FfmpegProcessingTest extends TestCase
         yield 'convert h265 mkv' => ['sample.mp4', 'convert', ['format' => 'mkv', 'video_codec' => 'h265', 'preset' => 'veryfast'], 'result', 'mkv', ['video_codec' => 'hevc']];
         yield 'resize crop vertical' => ['sample.mp4', 'resize', ['width' => 180, 'height' => 320, 'strategy' => 'crop', 'preset' => 'veryfast', 'fps' => 15], 'result', 'mp4', ['width' => 180, 'height' => 320, 'fps' => 15.0]];
         yield 'resize pad' => ['sample.mp4', 'resize', ['width' => 320, 'height' => 320, 'strategy' => 'pad', 'pad_color' => '#FFFFFF', 'preset' => 'veryfast'], 'result', 'mp4', ['width' => 320, 'height' => 320]];
+        yield 'socialai normalization' => ['sample.mp4', 'resize', ['width' => 720, 'height' => 900, 'strategy' => 'pad',
+            'video_codec' => 'h264', 'audio_codec' => 'aac', 'fps' => 30, 'preset' => 'veryfast',
+            'max_video_bitrate_kbps' => 500, 'audio_bitrate_kbps' => 96, 'audio_sample_rate' => 48000,
+            'audio_channels' => 2, 'deinterlace' => true], 'result', 'mp4',
+            ['width' => 720, 'height' => 900, 'fps' => 30.0, 'audio_channels' => 2, 'audio_sample_rate' => 48000, 'rotation' => 0]];
         yield 'resize fit' => ['sample.mp4', 'resize', ['width' => 200, 'height' => 200, 'strategy' => 'fit', 'preset' => 'veryfast'], 'result', 'mp4', ['width' => 200, 'height' => 150]];
         yield 'resize without audio' => ['sample-noaudio.mp4', 'resize', ['width' => 120, 'height' => 160, 'preset' => 'veryfast'], 'result', 'mp4', ['width' => 120, 'height' => 160, 'has_audio' => false]];
         yield 'trim accurate' => ['sample.mp4', 'trim', ['start' => 0.5, 'duration' => 1, 'preset' => 'veryfast'], 'result', 'mp4', ['duration_seconds' => 1.0]];
@@ -118,6 +124,44 @@ class FfmpegProcessingTest extends TestCase
         $this->assertSame(320, $job->result['media']['width']);
         $this->assertEqualsWithDelta(2.0, $job->result['media']['duration_seconds'], 0.1);
         $this->assertTrue($job->result['media']['has_audio']);
+    }
+
+    public function test_socialai_output_satisfies_pixel_scan_sar_and_audio_constraints(): void
+    {
+        $job = $this->runJob('sample.mp4', 'resize', [
+            'width' => 720, 'height' => 900, 'strategy' => 'pad', 'fps' => 30,
+            'max_video_bitrate_kbps' => 500, 'audio_bitrate_kbps' => 96,
+            'audio_sample_rate' => 48000, 'audio_channels' => 2, 'deinterlace' => true,
+        ]);
+        $this->assertSame(JobStatus::Completed, $job->status);
+        $path = Storage::disk('media')->path($job->outputs()->sole()->path);
+        $probe = new Process(['ffprobe', '-v', 'error', '-show_streams', '-of', 'json', $path]);
+        $probe->mustRun();
+        $streams = json_decode($probe->getOutput(), true, flags: JSON_THROW_ON_ERROR)['streams'];
+        $video = collect($streams)->firstWhere('codec_type', 'video');
+        $audio = collect($streams)->firstWhere('codec_type', 'audio');
+        $this->assertSame('h264', $video['codec_name']);
+        $this->assertSame('yuv420p', $video['pix_fmt']);
+        $this->assertSame('progressive', $video['field_order']);
+        $this->assertSame('1:1', $video['sample_aspect_ratio']);
+        $this->assertLessThanOrEqual(25000000, (int) $video['bit_rate']);
+        $this->assertSame('LC', $audio['profile']);
+        $this->assertLessThanOrEqual(128000, (int) $audio['bit_rate']);
+        $this->assertSame('48000', $audio['sample_rate']);
+        $this->assertSame(2, $audio['channels']);
+    }
+
+    public function test_linkedin_cbr_output_preserves_a_minimum_size_even_for_small_sources(): void
+    {
+        $job = $this->runJob('sample-noaudio.mp4', 'resize', [
+            'width' => 720, 'height' => 900, 'strategy' => 'pad', 'fps' => 30,
+            'constant_video_bitrate_kbps' => 1000, 'preset' => 'veryfast',
+        ]);
+        $this->assertSame(JobStatus::Completed, $job->status);
+        $output = $job->outputs()->sole();
+        $this->assertGreaterThanOrEqual(75 * 1024, $output->size_bytes);
+        $this->assertLessThanOrEqual(100 * 1024 * 1024, $output->size_bytes);
+        $this->assertSame('h264', $output->metadata['video_codec']);
     }
 
     public function test_result_endpoint_and_download_of_output(): void

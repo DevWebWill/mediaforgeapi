@@ -36,6 +36,11 @@ trait EncodesVideo
             new Parameter('preset', 'string', 'Velocidad de codificación frente a eficiencia (H.264/H.265).', default: 'medium', enum: ['veryfast', 'faster', 'fast', 'medium', 'slow']),
             new Parameter('fps', 'number', 'FPS de salida. Si se omite se conservan los originales.', min: 1, max: 60),
             new Parameter('audio_bitrate_kbps', 'integer', 'Bitrate de audio en kbps.', default: 128, enum: [64, 96, 128, 160, 192, 256, 320]),
+            new Parameter('max_video_bitrate_kbps', 'integer', 'Límite VBV de bitrate de vídeo en kbps.', min: 64, max: 25000),
+            new Parameter('constant_video_bitrate_kbps', 'integer', 'H.264 CBR con relleno para garantizar bitrate mínimo; excluye max_video_bitrate_kbps.', min: 64, max: 25000),
+            new Parameter('audio_sample_rate', 'integer', 'Frecuencia de muestreo del audio.', enum: [44100, 48000]),
+            new Parameter('audio_channels', 'integer', 'Número de canales de audio.', enum: [1, 2]),
+            new Parameter('deinterlace', 'boolean', 'Convertir vídeo entrelazado a progresivo sin duplicar FPS; desactivado si se omite.'),
         ];
     }
 
@@ -64,6 +69,11 @@ trait EncodesVideo
     {
         $errors = [];
         $container = self::CONTAINERS[$values['format']];
+
+        if (isset($values['constant_video_bitrate_kbps'])
+            && ($values['video_codec'] !== 'h264' || isset($values['max_video_bitrate_kbps']))) {
+            $errors['constant_video_bitrate_kbps'][] = 'CBR requiere H.264 y no se combina con max_video_bitrate_kbps.';
+        }
 
         if (! in_array($values['video_codec'], $container['video'], true)) {
             $errors['video_codec'][] = sprintf('El formato %s admite los códecs de vídeo: %s.', $values['format'], implode(', ', $container['video']));

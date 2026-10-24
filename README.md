@@ -92,6 +92,19 @@ Pruebas: `docker compose exec app php artisan test` (sqlite en memoria; abortan 
 
 Operaciones: `analyze`, `compress`, `convert` (mp4/mov/mkv/webm, h264/h265/vp9, aac/opus), `resize` (fit/crop/pad), `trim` (accurate/fast), `extract_audio` (mp3/m4a) y `thumbnail` (representativa o en un instante; jpg/png/webp). Los parámetros están en `GET /api/v1/operations`. Perfiles: `tiktok`, `instagram-reels`, `youtube-shorts`, `youtube-standard`, `generic-web`. Son puntos de partida y no garantizan el cumplimiento de las normas de cada plataforma.
 
+Las operaciones que recodifican vídeo admiten `max_video_bitrate_kbps` (64–25000,
+VBV con buffer de dos segundos), `audio_sample_rate` (44100/48000),
+`audio_channels` (1/2) y `deinterlace` (booleano, desactivado por defecto).
+`constant_video_bitrate_kbps` (64–25000, solo H.264) activa CBR con relleno,
+excluye `max_video_bitrate_kbps` y sustituye CRF; sirve para el tamaño mínimo
+de LinkedIn incluso con escenas estáticas.
+Permiten normalizar vídeo para SocialAI sin filtros arbitrarios: H.264 MP4 con
+bandas (`resize`, `strategy=pad`), 30 FPS y audio AAC estéreo 48 kHz.
+No se cambian los valores anteriores si se omiten estos parámetros.
+SocialAI conserva su copia privada, descarga y valida el resultado y elimina
+mediante la API los archivos remotos de entrada/salida. La retención y el
+comando de limpieza siguen siendo obligatorios para temporales huérfanos.
+
 Validaciones:
 
 - **Al subir**: firma real del archivo, ffprobe limitado a protocolo `file` y demuxers permitidos, y decodificación de los primeros segundos para detectar archivos corruptos o truncados.

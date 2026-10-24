@@ -42,6 +42,30 @@ class MediaOperationsTest extends TestCase
         $this->resolve('compress', ['video_codec' => 'rawvideo']);
     }
 
+    public function test_encoding_controls_reject_out_of_range_values(): void
+    {
+        foreach (['max_video_bitrate_kbps' => 25001, 'audio_sample_rate' => 96000, 'audio_channels' => 6, 'deinterlace' => 'invalid'] as $key => $value) {
+            try {
+                $this->resolve('convert', ['format' => 'mp4', $key => $value]);
+                $this->fail('Invalid encoding control accepted: '.$key);
+            } catch (ValidationException $e) {
+                $this->assertArrayHasKey('parameters.'.$key, $e->errors());
+            }
+        }
+    }
+
+    public function test_cbr_requires_h264_and_excludes_separate_max_bitrate(): void
+    {
+        foreach ([['format' => 'webm'], ['format' => 'mp4', 'max_video_bitrate_kbps' => 1000]] as $parameters) {
+            try {
+                $this->resolve('convert', [...$parameters, 'constant_video_bitrate_kbps' => 1000]);
+                $this->fail('Conflicting CBR encoding control accepted');
+            } catch (ValidationException $e) {
+                $this->assertArrayHasKey('parameters.constant_video_bitrate_kbps', $e->errors());
+            }
+        }
+    }
+
     public function test_compress_applies_defaults(): void
     {
         $params = $this->resolve('compress', []);
